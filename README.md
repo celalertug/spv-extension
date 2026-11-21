@@ -11,8 +11,12 @@ Install: `chrome://extensions` → Developer mode → Load unpacked → this fol
 
 ## How the VIN is chosen
 
-SPV only takes a VIN (no year/make/model query) and only matches positions 1-8 and 10 (WMI, VDS,
-model year); check digit, plant, serial and mileage do not change the value. So:
+SPV only takes a VIN and mileage (no year/make/model query) and only matches VIN positions 1-8 and 10
+(WMI, VDS, model year); check digit, plant and serial do not change the value. Mileage changes it for
+recent model years only (2017 and newer as of 2026: a 2017 Silverado is $14,125 at 1,000 miles and
+$7,575 at 200,000; a 2016 Camry is the same at any mileage). The card sends the listing's odometer
+(km converted) and shows it next to the vehicle; with no mileage it sends 0, which SPV answers with the
+value at average mileage. So:
 
 1. A VIN the user typed on the card for this listing ("Have the VIN?"), or a variant they picked.
 2. `vehicle_identification_number` from the listing data.

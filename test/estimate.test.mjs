@@ -59,5 +59,17 @@ for (const c of cases.filter((c) => !filter || c.name.toLowerCase().includes(fil
   if (r.ok && c.expect.value) assert(r.spv.value === c.expect.value, `${c.name} value ${r.spv.value}`);
   if (r.ok && c.expect.source) assert(r.source === c.expect.source, `${c.name} source ${r.source}`);
 }
+// SPV adjusts recent model years for mileage: the same listing text at another mileage reuses the
+// cached VIN but asks SPV again for the main value and the variants.
+if (!filter || 'mileage'.includes(filter.toLowerCase())) {
+  const l = { year: 2017, make: 'Chevrolet', model: 'Silverado 1500 Crew Cab', trim: 'LT Pickup 4D 5 3/4 ft', title: '2017 Chevrolet Silverado 1500 Crew Cab · LT Pickup 4D 5 3/4 ft' };
+  const low = await estimate({ ...l, mileage: 20000 }, { makes, loadIndex, cache, seedFills });
+  const high = await estimate({ ...l, mileage: 220000 }, { makes, loadIndex, cache, seedFills });
+  const alt = (r) => (r.alternatives || []).map((a) => a.value).join(',');
+  console.log(`Mileage: 20k ${low.spv?.valueText} [${alt(low)}] -> 220k ${high.spv?.valueText} [${alt(high)}] cached=${!!high.cached} q=${high.queries}`);
+  assert(low.ok && high.ok && high.cached, 'mileage: both resolved, second from cache');
+  assert(high.spv.value < low.spv.value, 'mileage: higher mileage, lower SPV');
+  assert(!low.alternatives.length || alt(low) !== alt(high), 'mileage: variant values re-priced');
+}
 console.log(failed ? `${failed} failed` : 'all passed');
 process.exit(failed ? 1 : 0);

@@ -1,7 +1,8 @@
 // Texas SPV lookup and VIN resolution. Runs in the extension service worker and in Node (tests).
 //
 // SPV (tools.txdmv.gov) only takes a VIN + mileage. It matches on the VIN pattern (WMI, VDS and
-// model-year character) and ignores the check digit, plant, serial and mileage. So when a listing
+// model-year character) and ignores the check digit, plant and serial; mileage changes the value of
+// recent model years only (0 = the value at average mileage). So when a listing
 // has no VIN we build one: match.js ranks every vPIC variant of the year/make against the listing
 // text, and the best ones are turned into VINs (open positions filled with the characters that
 // worked before for that WMI, then the ones vPIC uses most) until SPV recognizes one. Real VIN
@@ -64,7 +65,7 @@ export function parseSpvHtml(html) {
 }
 
 export async function spvLookup(vin, mileage, fetchImpl = fetch) {
-  const body = new URLSearchParams({ vin, mileage: String(Math.max(0, Math.round(mileage || 0))).slice(0, 6) });
+  const body = new URLSearchParams({ vin, mileage: String(Math.min(999999, Math.max(0, Math.round(mileage || 0)))) });
   const res = await fetchImpl(SPV_URL, {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
@@ -197,7 +198,14 @@ export async function estimate(listing, deps) {
     const spv = await lookup(vin);
     if (spv.ok) {
       const prev = typeof hit === 'string' ? { source: 'seen' } : hit;
-      return { ok: true, ...prev, source: prev.source || 'seen', vin, spv, queries, cached: true };
+      // SPV adjusts recent model years for mileage, so the variants' values are asked again unless
+      // the mileage is the same or the main value did not move with it.
+      let alternatives = prev.alternatives || [];
+      if (alternatives.length && prev.mileage !== mileage && prev.value !== spv.value) {
+        const fresh = await Promise.all(alternatives.map((a) => lookup(a.vin)));
+        alternatives = alternatives.flatMap((a, i) => (fresh[i].ok ? [{ ...a, model: fresh[i].model, value: fresh[i].value }] : []));
+      }
+      return { ok: true, ...prev, alternatives, source: prev.source || 'seen', vin, spv, queries, cached: true };
     }
   }
 
@@ -329,7 +337,7 @@ export async function estimate(listing, deps) {
 
   const conf = confidence(primary, top);
   const result = { ok: true, source: 'estimated', vin: primary.vin, label: primary.label, spv: primary.spv, alternatives, confidence: conf, queries, searchQueries, fromReal: !!primary.real };
-  if (cache) await cache.set(estKey(listing), { vin: primary.vin, source: 'estimated', label: primary.label, alternatives, confidence: conf, fromReal: !!primary.real });
+  if (cache) await cache.set(estKey(listing), { vin: primary.vin, source: 'estimated', label: primary.label, alternatives, confidence: conf, fromReal: !!primary.real, mileage, value: primary.spv.value });
   return result;
 }
 

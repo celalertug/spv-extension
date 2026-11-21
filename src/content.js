@@ -288,7 +288,13 @@
       const srcTip = [how, conf, `VIN: ${result.vin}`].filter(Boolean).join('\n');
       const dot = result.source === 'estimated' ? `<span class="dot ${esc(result.confidence)}"></span>` : '';
       const label = cleanLabel(result.label, spv.model);
-      const nameTip = [`${spv.year} ${spv.make} ${spv.model}`, label, 'Texas Standard Presumptive Value (TxDMV)'].filter(Boolean).join('\n');
+      // SPV adjusts recent model years for mileage; 0 (unknown) gets the value at average mileage.
+      const miles = listing && listing.mileage > 0 ? listing.mileage : 0;
+      const milesText = miles ? `${miles >= 1000 ? `${Math.round(miles / 1000)}k` : miles} mi` : 'avg. miles';
+      const milesTip = miles
+        ? `Value for ${miles.toLocaleString('en-US')} miles (SPV adjusts recent model years for mileage)`
+        : 'No mileage in the listing: SPV value at average mileage';
+      const nameTip = [`${spv.year} ${spv.make} ${spv.model}`, label, milesTip, 'Texas Standard Presumptive Value (TxDMV)'].filter(Boolean).join('\n');
 
       let rows = '';
       const price = listing && listing.price;
@@ -306,7 +312,7 @@
       body = `
         <div class="top"><div class="value">${money(spv.value)}</div><span class="src ${esc(result.source)}" title="${esc(srcTip)}">${dot}${esc(chip)}</span></div>
         <div class="more">
-          <div class="sub" title="${esc(nameTip)}">${esc(spv.year)} ${esc(spv.make)} ${esc(spv.model)}${label ? ` <i>${esc(shortLabel(label))}</i>` : ''}</div>
+          <div class="sub" title="${esc(nameTip)}">${esc(spv.year)} ${esc(spv.make)} ${esc(spv.model)}${label ? ` <i>${esc(shortLabel(label))}</i>` : ''} · ${esc(milesText)}</div>
           ${rows ? `<div class="sep"></div>${rows}` : ''}
           ${notice ? `<div class="err">${esc(notice)}</div>` : ''}
           ${altBlock}
