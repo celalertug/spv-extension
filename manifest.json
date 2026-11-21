@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Texas SPV for Marketplace",
+  "version": "0.1.0",
+  "description": "Shows the Texas Standard Presumptive Value (TxDMV) on Facebook Marketplace vehicle listings.",
+  "permissions": ["storage"],
+  "host_permissions": ["https://tools.txdmv.gov/*"],
+  "background": { "service_worker": "src/background.js", "type": "module" },
+  "content_scripts": [
+    {
+      "matches": ["https://www.facebook.com/*"],
+      "js": ["src/hook.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://www.facebook.com/*"],
+      "js": ["src/content.js"],
+      "run_at": "document_start"
+    }
+  ]
+}

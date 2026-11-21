@@ -1,0 +1,1 @@
+{"make":"Standard Motor Corporation","models":{"Standard Motor Corporation":[["RFR",2010,2027,7935,"*"]]},"schemas":{"7935":[["B","B","Motorcycle - Unknown Body Class"],["S","B","Motorcycle - Scooter"]]},"wmis":{"RFR":["BS","","","38","50","M"]},"wschemas":{"RFR":[[7935,2010,2027]]},"pchars":{"7935":[["BS","1,1"],["",""],["",""],["38","1,1"],["50","1,1"],["M","4"]]}}
