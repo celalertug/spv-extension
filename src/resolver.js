@@ -263,8 +263,9 @@ export async function estimate(listing, deps) {
   }
   queue.sort((a, b) => a.cost - b.cost);
 
-  // SPV ignores the check digit, plant and serial, so one query per VIN pattern.
-  const tried = new Set();
+  // SPV ignores the check digit, plant and serial, so one query per VIN pattern. Every answer is
+  // kept: a batch queried in parallel often holds the VIN of another likely variant.
+  const answers = new Map(); // pattern -> SPV result
   const pattern = (vin) => vin.slice(0, 8) + vin[9];
   const matches = (spv) => spv.ok && spv.year === listing.year && sameMake(spv.make, listing.make);
   const labelOf = (v) => describe(v) || (v.pseudo ? v.model : '');
@@ -273,11 +274,12 @@ export async function estimate(listing, deps) {
     const batch = [];
     while (batch.length < Math.min(parallel, maxSearch - queries) && k < queue.length) {
       const c = queue[k++];
-      if (!tried.has(pattern(c.vin))) { tried.add(pattern(c.vin)); batch.push(c); }
+      if (!answers.has(pattern(c.vin))) { answers.set(pattern(c.vin), null); batch.push(c); }
     }
     if (!batch.length) break;
     onProgress({ step: 'search', vin: batch[0].vin, label: labelOf(batch[0].v), tried: queries + batch.length });
     const results = await Promise.all(batch.map((c) => lookup(c.vin)));
+    batch.forEach((c, i) => answers.set(pattern(c.vin), results[i]));
     const hit = results.findIndex(matches);
     if (hit >= 0) primary = { ...batch[hit], spv: results[hit], label: labelOf(batch[hit].v) };
   }
@@ -285,17 +287,21 @@ export async function estimate(listing, deps) {
   const searchQueries = queries;
   if (primary.open) await learnFill(cache, primary.v.wmi, primary);
 
-  // A few VINs of one variant: its real prefixes, then built ones.
+  // A few VINs of one variant: its real prefixes, then built ones; answers SPV already gave are reused.
   const tryVariant = async (v, perVariant) => {
-    const cands = [
+    const all = [
       ...(realOf.get(v) || []).slice(0, perVariant).map((r) => ({ vin: realVin(r.prefix, v), real: r })),
       ...(v.pseudo ? [] : vinsFor(v, listing.year, perVariant, await learnedFor(v.wmi))),
-    ].filter((c) => !tried.has(pattern(c.vin))).slice(0, perVariant);
+    ].slice(0, perVariant);
+    const known = all.find((c) => answers.get(pattern(c.vin)) && matches(answers.get(pattern(c.vin))));
+    if (known) return { ...known, spv: answers.get(pattern(known.vin)), label: labelOf(v) };
+    const cands = all.filter((c) => !answers.has(pattern(c.vin)));
     for (let i = 0; i < cands.length && queries < maxQueries; i += parallel) {
       const batch = cands.slice(i, i + Math.min(parallel, maxQueries - queries));
-      batch.forEach((c) => tried.add(pattern(c.vin)));
+      batch.forEach((c) => answers.set(pattern(c.vin), null));
       onProgress({ step: 'search', vin: batch[0].vin, label: labelOf(v), tried: queries + batch.length });
       const results = await Promise.all(batch.map((c) => lookup(c.vin)));
+      batch.forEach((c, j) => answers.set(pattern(c.vin), results[j]));
       const k = results.findIndex(matches);
       if (k >= 0) return { ...batch[k], spv: results[k], label: labelOf(v) };
     }

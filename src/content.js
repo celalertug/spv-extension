@@ -128,7 +128,7 @@
     if (current && current.port) try { current.port.disconnect(); } catch {}
     current = id ? { id } : null;
     if (!id || dismissed.has(id)) { removeCard(); return; }
-    render({ state: 'loading', text: 'Reading listing…' });
+    render({ state: 'loading', text: 'Reading the listing…' });
     let listing = await waitForListing(id, 6000);
     if (!current || current.id !== id) return;
     if (!listing || !listing.make) {
@@ -148,8 +148,8 @@
     port.onMessage.addListener((msg) => {
       if (!current || current.id !== id) return;
       if (msg.type === 'progress') {
-        const text = msg.step === 'search' ? `Finding a VIN SPV knows… (${msg.tried} tried)` : 'Asking TxDMV…';
-        render({ state: 'loading', text, listing: msg.listing || listing });
+        const hint = msg.step === 'search' ? `${msg.tried} VIN patterns tried` : 'Asking TxDMV';
+        render({ state: 'loading', text: 'Looking up the Texas value…', hint, listing: msg.listing || listing });
       } else if (msg.type === 'result') {
         current.listing = msg.listing || listing;
         if (msg.result.ok || !current.result || !current.result.ok) current.result = msg.result;
@@ -170,24 +170,38 @@
   const money = (n) => (Number.isFinite(n) ? `$${Math.round(n).toLocaleString('en-US')}` : '—');
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+  // StarTag mark (assets/logo-small.svg without the mask wrapper; tools/build_brand.mjs) and brand colors.
+  const LOGO = '<svg viewBox="0 0 128 128" aria-hidden="true"><path d="M -50 0 L -24 -30 L 40 -30 L 40 30 L -24 30 Z" transform="translate(64 64) scale(0.94) rotate(45)" fill="none" stroke="#FFF8EC" stroke-width="24" stroke-linejoin="round"/><path d="M -50 0 L -24 -30 L 40 -30 L 40 30 L -24 30 Z" transform="translate(64 64) scale(0.94) rotate(45)" fill="#0B2A4A" stroke="#0B2A4A" stroke-width="14" stroke-linejoin="round"/><polygon points="70.65,44.33 77.14,61.7 95.68,62.51 81.16,74.06 86.12,91.94 70.65,81.7 55.18,91.94 60.13,74.06 45.61,62.51 64.15,61.7" fill="#fff" stroke="#fff" stroke-width="2" stroke-linejoin="round"/><polygon points="70.65,58.9 73.55,66.65 81.82,67.02 75.34,72.17 77.55,80.15 70.65,75.58 63.74,80.15 65.95,72.17 59.47,67.02 67.75,66.65" fill="#C8102E"/></svg>';
+  const NAVY = '#0B2A4A';
+  const RED = '#C8102E';
+
+  // Source of the value: a short chip on the card, the explanation in its tooltip.
   const SOURCE = {
-    user: 'VIN you entered',
-    chosen: 'Variant you picked',
-    listing: 'VIN from the listing',
-    description: 'VIN found in the description',
-    seen: 'VIN from an earlier listing of this model',
-    estimated: 'No VIN in the listing: estimated with a VIN built for this model',
+    user: ['Your VIN', 'VIN you entered'],
+    chosen: ['Picked', 'Variant you picked'],
+    listing: ['VIN', 'VIN from the listing'],
+    description: ['VIN', 'VIN found in the description'],
+    seen: ['VIN', 'VIN from an earlier listing of this model'],
+    estimated: ['Estimate', 'No VIN in the listing: estimated with a VIN built for this model'],
   };
 
   function removeCard() {
     if (host) { host.remove(); host = null; }
   }
 
-  // Label parts the SPV model name already says ("350" in "GS 350") are dropped.
+  // Label parts the SPV model name already says ("350" in "GS 350") and repeats are dropped.
   function cleanLabel(label, model) {
-    const m = String(model || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-    return String(label || '').split(' · ').filter((p) => p && !m.includes(p.toLowerCase().replace(/[^a-z0-9]/g, ''))).join(' · ');
+    const key = (p) => p.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const m = key(String(model || ''));
+    const seen = new Set();
+    return String(label || '').split(' · ').filter((p) => {
+      const k = key(p);
+      if (!k || m.includes(k) || seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    }).join(' · ');
   }
+  const shortLabel = (label) => label.split(' · ').slice(0, 2).join(' · ');
 
   const POS_KEY = 'spvExtCardPos';
   const ui = { collapsed: localStorage.getItem('spvExtCollapsed') === '1' };
@@ -197,7 +211,7 @@
 
   function makeDraggable(card, handle) {
     handle.addEventListener('pointerdown', (e) => {
-      if (e.target.closest('button')) return;
+      if (e.target.closest('button, a')) return;
       const r = card.getBoundingClientRect();
       const dx = e.clientX - r.left;
       const dy = e.clientY - r.top;
@@ -220,9 +234,9 @@
   }
 
   const CONFIDENCE = {
-    high: 'Model and trim match the listing text.',
-    medium: 'Model matches the listing; trim or engine is a guess.',
-    low: 'Model guessed from partial listing text: check the variant.',
+    high: 'High confidence: model and trim match the listing text.',
+    medium: 'Medium confidence: the model matches; trim or engine is a guess.',
+    low: 'Low confidence: the model is a guess from partial listing text.',
   };
 
   function send(msg) {
@@ -246,7 +260,7 @@
       <form><input name="vin" maxlength="17" placeholder="17-character VIN" spellcheck="false" autocomplete="off"><button>Check</button></form></details>`;
   }
 
-  function render({ state, text, listing, result, notice }) {
+  function render({ state, text, hint, listing, result, notice }) {
     if (!host) {
       host = document.createElement('div');
       host.id = 'spv-ext-card';
@@ -254,97 +268,108 @@
       document.documentElement.appendChild(host);
     }
     const dark = document.documentElement.classList.contains('__fb-dark-mode');
-    const vehicle = listing ? [listing.year, listing.make, listing.model].filter(Boolean).join(' ') + (listing.trim ? ` · ${listing.trim}` : '') : '';
+    const muted = dark ? '#b0b3b8' : '#65676b';
+    const line = dark ? '#3e4042' : '#e4e6eb';
+    const vehicle = listing ? [listing.year, listing.make, listing.model].filter(Boolean).join(' ') : '';
     let body = '';
+    let foot = '';
     if (state === 'loading') {
-      body = `<div class="muted">${esc(vehicle)}</div><div class="loading"><span class="spin"></span>${esc(text)}</div>`;
+      body = `<div class="sub">${esc(vehicle)}</div><div class="loading" title="${esc(hint || '')}"><span class="spin"></span>${esc(text)}</div>`;
     } else if (state === 'error') {
-      body = `<div class="muted">${esc(vehicle)}</div><div class="err">${esc(result.error)}</div>${vinForm()}`;
+      body = `<div class="sub">${esc(vehicle)}</div><div class="err" title="${esc(result.error)}">No value for this listing <span class="i">ⓘ</span></div>`;
+      foot = vinForm();
     } else {
       const spv = result.spv;
+      const [chip, srcText] = SOURCE[result.source] || [result.source, result.source];
+      const how = result.source === 'estimated' && result.fromReal
+        ? 'No VIN in the listing: estimated from a VIN pattern seen on real vehicles of this model'
+        : srcText;
+      const conf = result.source === 'estimated' ? CONFIDENCE[result.confidence] : '';
+      const srcTip = [how, conf, `VIN: ${result.vin}`].filter(Boolean).join('\n');
+      const dot = result.source === 'estimated' ? `<span class="dot ${esc(result.confidence)}"></span>` : '';
+      const label = cleanLabel(result.label, spv.model);
+      const nameTip = [`${spv.year} ${spv.make} ${spv.model}`, label, 'Texas Standard Presumptive Value (TxDMV)'].filter(Boolean).join('\n');
+
+      let rows = '';
       const price = listing && listing.price;
-      let compare = '';
       if (Number.isFinite(price) && price > 0) {
         const diff = price - spv.value;
-        const pct = spv.value ? Math.round((Math.abs(diff) / spv.value) * 100) : 0;
-        const cls = diff > 0 ? 'up' : 'down';
-        compare = `<div class="row"><span>Listing price</span><b>${money(price)}</b></div>
-          <div class="row"><span></span><span class="${cls}">${money(Math.abs(diff))} (${pct}%) ${diff >= 0 ? 'above' : 'below'} SPV</span></div>`;
-        const basis = Math.max(price, 0.8 * spv.value);
-        const bySpv = 0.8 * spv.value > price;
-        compare += `<div class="row"><span>Sales tax (6.25%)</span><b>≈ ${money(basis * 0.0625)}</b></div>
-          <div class="row note"><span></span><span>on ${money(basis)}${bySpv ? ', 80% of SPV (higher than the price)' : ', the price'}</span></div>`;
+        const pct = spv.value ? Math.round((diff / spv.value) * 100) : 0;
+        rows = `<div class="row" title="${esc(`${money(Math.abs(diff))} ${diff >= 0 ? 'above' : 'below'} SPV`)}"><span>Price</span><span><b>${money(price)}</b> <span class="${diff > 0 ? 'up' : 'down'}">${pct > 0 ? '+' : pct < 0 ? '−' : '±'}${Math.abs(pct)}%</span></span></div>`;
       }
-      const alts = (result.alternatives || []).map((a, i) => {
+      const alts = result.alternatives || [];
+      // Similar variants with their SPV; clicking one makes it the main value.
+      const altBlock = alts.length ? `<div class="alts"><div class="label">Similar variants</div>${alts.map((a, i) => {
         const lbl = cleanLabel(a.label, a.model);
-        return `<div class="row alt" data-alt="${i}" title="Use this variant"><span>${esc(a.model)}${lbl ? ` <i>${esc(lbl)}</i>` : ''}</span><b>${money(a.value)}</b></div>`;
-      }).join('');
-      const srcText = result.source === 'estimated' && result.fromReal
-        ? 'No VIN in the listing: estimated with a VIN pattern seen on real vehicles of this model'
-        : SOURCE[result.source] || result.source;
-      const src = esc(srcText) +
-        (result.source === 'estimated' && CONFIDENCE[result.confidence] ? `<br><span class="conf ${result.confidence}">${esc(CONFIDENCE[result.confidence])}</span>` : '');
-      const label = cleanLabel(result.label, spv.model);
+        return `<div class="row alt" data-alt="${i}" title="${esc([a.model, lbl].filter(Boolean).join(' · '))}\nClick to use"><span class="t">${esc(a.model)}${lbl ? ` <i>${esc(shortLabel(lbl))}</i>` : ''}</span><b>${money(a.value)}</b></div>`;
+      }).join('')}</div>` : '';
       body = `
-        <div class="value">${money(spv.value)}</div>
+        <div class="top"><div class="value">${money(spv.value)}</div><span class="src ${esc(result.source)}" title="${esc(srcTip)}">${dot}${esc(chip)}</span></div>
         <div class="more">
-        <div class="muted">${esc(spv.year)} ${esc(spv.make)} ${esc(spv.model)}${label ? ` <i>${esc(label)}</i>` : ''}</div>
-        <div class="sep"></div>
-        ${compare}
-        <div class="row"><span>VIN</span><code>${esc(result.vin)}</code></div>
-        <div class="src ${result.source}">${src}</div>
-        ${notice ? `<div class="err">${esc(notice)}</div>` : ''}
-        ${alts ? `<div class="sep"></div><div class="label">Other variants · click to use</div>${alts}` : ''}
-        ${result.source === 'listing' || result.source === 'description' ? '' : vinForm()}
+          <div class="sub" title="${esc(nameTip)}">${esc(spv.year)} ${esc(spv.make)} ${esc(spv.model)}${label ? ` <i>${esc(shortLabel(label))}</i>` : ''}</div>
+          ${rows ? `<div class="sep"></div>${rows}` : ''}
+          ${notice ? `<div class="err">${esc(notice)}</div>` : ''}
+          ${altBlock}
         </div>`;
+      foot = result.source === 'listing' || result.source === 'description' ? '' : vinForm();
     }
     host.shadowRoot.innerHTML = `
       <style>
         :host { all: initial; }
-        .card { position: fixed; top: 72px; right: 16px; z-index: 2147483000; width: 300px; box-sizing: border-box;
+        .card { position: fixed; top: 72px; right: 16px; z-index: 2147483000; width: 264px; box-sizing: border-box;
           font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
           color: ${dark ? '#e4e6eb' : '#1c1e21'}; background: ${dark ? '#242526' : '#fff'};
-          border: 1px solid ${dark ? '#3e4042' : '#dddfe2'}; border-radius: 10px; padding: 12px 14px;
+          border: 1px solid ${dark ? '#3e4042' : '#dddfe2'}; border-top: 3px solid ${dark ? '#3b5b85' : NAVY}; border-radius: 10px; padding: 8px 14px 12px;
           box-shadow: 0 4px 16px rgba(0,0,0,.15); }
-        .head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
-        .title { font-weight: 600; font-size: 12px; letter-spacing: .02em; color: ${dark ? '#b0b3b8' : '#65676b'}; }
-        .x { cursor: pointer; border: 0; background: none; color: inherit; font-size: 16px; line-height: 1; padding: 2px 4px; opacity: .6; }
-        .x:hover { opacity: 1; }
-        .value { font-size: 26px; font-weight: 700; }
-        .muted { color: ${dark ? '#b0b3b8' : '#65676b'}; }
-        i { font-style: normal; color: ${dark ? '#b0b3b8' : '#65676b'}; font-size: 12px; }
-        .sep { height: 1px; background: ${dark ? '#3e4042' : '#e4e6eb'}; margin: 8px 0; }
-        .row { display: flex; justify-content: space-between; gap: 8px; margin: 2px 0; }
-        .row.note { font-size: 11px; color: ${dark ? '#b0b3b8' : '#65676b'}; margin-top: -2px; }
-        .row.alt span { min-width: 0; }
-        .up { color: #d93025; } .down { color: #188038; }
-        code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; user-select: all; }
-        .src { margin-top: 6px; font-size: 11px; padding: 4px 6px; border-radius: 6px; background: ${dark ? '#3a3b3c' : '#f0f2f5'}; }
-        .src.estimated, .src.seen { background: ${dark ? '#4a3f1d' : '#fff4d6'}; }
-        .label { font-size: 11px; font-weight: 600; color: ${dark ? '#b0b3b8' : '#65676b'}; margin-bottom: 2px; }
-        .loading { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
-        .spin { width: 12px; height: 12px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: s .8s linear infinite; opacity: .6; }
+        .head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; cursor: grab; user-select: none; }
+        .brand { display: flex; align-items: center; gap: 6px; }
+        .brand svg { width: 18px; height: 18px; flex: none; }
+        .brand b { font-size: 13px; font-weight: 800; letter-spacing: -.01em; color: ${dark ? '#e4e6eb' : NAVY}; }
+        .brand .r { color: ${dark ? '#ff6b7d' : RED}; }
+        .tools { display: flex; align-items: center; gap: 2px; }
+        .tools a, .x { color: ${muted}; text-decoration: none; border: 0; background: none; cursor: pointer; font-size: 14px; line-height: 1; padding: 2px 4px; border-radius: 4px; }
+        .tools a:hover, .x:hover { color: inherit; background: ${dark ? '#3a3b3c' : '#f0f2f5'}; }
+        .top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+        .value { font-size: 26px; font-weight: 700; letter-spacing: -.01em; }
+        .src { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; cursor: help;
+          color: ${muted}; background: ${dark ? '#3a3b3c' : '#f0f2f5'}; }
+        .dot { width: 7px; height: 7px; border-radius: 50%; background: ${muted}; }
+        .dot.high { background: #1e8e3e; } .dot.medium { background: #e0a100; } .dot.low { background: #d93025; }
+        .sub { color: ${muted}; margin-top: 1px; }
+        .more .sub { cursor: help; }
+        i { font-style: normal; color: ${muted}; }
+        .sep { height: 1px; background: ${line}; margin: 8px 0 6px; }
+        .row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin: 3px 0; }
+        .row > span:first-child { color: ${muted}; }
+        .up { color: #d93025; font-size: 12px; font-weight: 600; } .down { color: #1e8e3e; font-size: 12px; font-weight: 600; }
+        details { margin-top: 6px; }
+        summary { cursor: pointer; list-style: none; font-size: 12px; color: ${muted}; }
+        summary::-webkit-details-marker { display: none; }
+        summary:hover { color: inherit; }
+        .alts { border-top: 1px solid ${line}; padding-top: 6px; margin-top: 8px; }
+        .alts .label { font-size: 11px; color: ${muted}; margin-bottom: 2px; }
+        .row.alt { cursor: pointer; border-radius: 4px; padding: 2px 4px; margin: 1px -4px; font-size: 12px; }
+        .row.alt .t { color: inherit; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .row.alt:hover { background: ${dark ? '#3a3b3c' : '#f0f2f5'}; }
+        .loading { display: flex; align-items: center; gap: 8px; margin-top: 6px; color: ${muted}; }
+        .spin { width: 12px; height: 12px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: s .8s linear infinite; }
         @keyframes s { to { transform: rotate(360deg); } }
-        .err { color: #d93025; margin-top: 6px; }
-        a { color: ${dark ? '#4599ff' : '#0064d1'}; text-decoration: none; font-size: 12px; }
-        .foot { margin-top: 8px; display: flex; justify-content: space-between; }
-        .head { cursor: grab; user-select: none; }
+        .err { color: #d93025; margin-top: 6px; font-size: 12px; }
+        .err[title] { cursor: help; }
+        .err .i { font-size: 11px; opacity: .8; }
         .card.collapsed .more, .card.collapsed .foot { display: none; }
         .card.collapsed .value { font-size: 20px; }
-        .row.alt { cursor: pointer; border-radius: 4px; padding: 1px 2px; margin: 1px -2px; }
-        .row.alt:hover { background: ${dark ? '#3a3b3c' : '#f0f2f5'}; }
-        .conf.low { color: #b3261e; } .conf.medium { color: ${dark ? '#e3b341' : '#8a5a00'}; }
-        details.vin { margin-top: 8px; font-size: 12px; }
-        details.vin summary { cursor: pointer; color: ${dark ? '#4599ff' : '#0064d1'}; }
+        details.vin summary { color: ${dark ? '#4599ff' : '#0064d1'}; }
         details.vin form { display: flex; gap: 6px; margin-top: 6px; }
         details.vin input { flex: 1; min-width: 0; font: 12px ui-monospace, Menlo, monospace; text-transform: uppercase; padding: 4px 6px;
           border: 1px solid ${dark ? '#3e4042' : '#ccd0d5'}; border-radius: 6px; background: ${dark ? '#3a3b3c' : '#fff'}; color: inherit; }
-        details.vin button { font: 600 12px inherit; padding: 4px 10px; border-radius: 6px; border: 0; background: #0866ff; color: #fff; cursor: pointer; }
+        details.vin button { font: 600 12px inherit; padding: 4px 10px; border-radius: 6px; border: 0; background: ${dark ? '#3b5b85' : NAVY}; color: #fff; cursor: pointer; }
       </style>
       <div class="card${ui.collapsed ? ' collapsed' : ''}" data-state="${state}">
-        <div class="head" title="Drag to move, click to collapse"><span class="title">TEXAS SPV · PRIVATE VALUE</span><button class="x" title="Hide for this listing">×</button></div>
+        <div class="head" title="Drag to move, click to collapse"><span class="brand">${LOGO}<b>Star<span class="r">Tag</span></b></span>
+          <span class="tools"><a href="https://www.txdmv.gov/standard-presumptive-calculator" target="_blank" rel="noopener" title="TxDMV SPV calculator">↗</a><button class="x" title="Hide for this listing">×</button></span></div>
         ${body}
-        <div class="foot"><a href="https://www.txdmv.gov/standard-presumptive-calculator" target="_blank" rel="noopener">TxDMV SPV calculator ↗</a></div>
+        ${foot ? `<div class="foot">${foot}</div>` : ''}
       </div>`;
     const card = host.shadowRoot.querySelector('.card');
     const pos = savedPos();

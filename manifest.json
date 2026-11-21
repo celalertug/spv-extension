@@ -1,21 +1,50 @@
 {
   "manifest_version": 3,
-  "name": "Texas SPV for Marketplace",
+  "name": "StarTag – Texas SPV for Marketplace",
+  "short_name": "StarTag",
   "version": "0.1.0",
-  "description": "Shows the Texas Standard Presumptive Value (TxDMV) on Facebook Marketplace vehicle listings.",
-  "permissions": ["storage"],
-  "host_permissions": ["https://tools.txdmv.gov/*"],
-  "background": { "service_worker": "src/background.js", "type": "module" },
+  "description": "See the Texas Standard Presumptive Value (TxDMV) of Facebook Marketplace vehicle listings, with similar variants.",
+  "icons": {
+    "16": "assets/icon-16.png",
+    "32": "assets/icon-32.png",
+    "48": "assets/icon-48.png",
+    "128": "assets/icon-128.png"
+  },
+  "action": {
+    "default_title": "StarTag: Texas SPV on Marketplace listings",
+    "default_icon": {
+      "16": "assets/icon-16.png",
+      "32": "assets/icon-32.png"
+    }
+  },
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://tools.txdmv.gov/*"
+  ],
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
   "content_scripts": [
     {
-      "matches": ["https://www.facebook.com/*"],
-      "js": ["src/hook.js"],
+      "matches": [
+        "https://www.facebook.com/*"
+      ],
+      "js": [
+        "src/hook.js"
+      ],
       "run_at": "document_start",
       "world": "MAIN"
     },
     {
-      "matches": ["https://www.facebook.com/*"],
-      "js": ["src/content.js"],
+      "matches": [
+        "https://www.facebook.com/*"
+      ],
+      "js": [
+        "src/content.js"
+      ],
       "run_at": "document_start"
     }
   ]

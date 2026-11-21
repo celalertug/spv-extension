@@ -1,8 +1,11 @@
-# Texas SPV for Marketplace
+<p align="center"><img src="assets/banner.png" alt="StarTag: Texas SPV on every Marketplace car" width="720"></p>
+
+# StarTag: Texas SPV for Marketplace
 
 Chrome extension (MV3). Shows the TxDMV Standard Presumptive Value of the vehicle on a Facebook
-Marketplace listing page in a card: SPV, listing price vs SPV, Texas sales tax (6.25% of the higher
-of price or 80% of SPV), the VIN it used, how sure the estimate is, and other variants of the model.
+Marketplace listing page in a card: SPV, listing price vs SPV and the SPV of similar variants of the
+model (click one to use it). How the value was found, how sure the estimate is and the VIN it used
+are in the tooltips.
 
 Install: `chrome://extensions` → Developer mode → Load unpacked → this folder.
 
@@ -48,6 +51,8 @@ and models that did not exist that year).
   `@cardog/corgi` npm package, `dist/db/vpic.lite.db.gz`).
 - `tools/build_real.py`: adds real VIN prefixes to `data/index/` from NHTSA's
   [FLAT_CMPL.zip](https://static.nhtsa.gov/odi/ffdd/cmpl/FLAT_CMPL.zip). Run after `build_index.py`.
+- `assets/`: StarTag logo (`logo.svg`, `logo-small.svg` for 16-32 px), extension icons, README banner;
+  `node tools/build_brand.mjs` regenerates them (navy `#0B2A4A`, red `#C8102E`, cream `#FFF8EC`).
 - `tools/calibrate.mjs`: runs the resolver on a corpus of Marketplace titles against live SPV,
   reports the resolve rate and query counts, and merges the learned fill characters into `data/fills.json`.
 

@@ -59,7 +59,8 @@ await tabtape.step(page, 'Open the listing from the feed');
 await page.click('#open');
 const t0 = Date.now();
 const stateA = await waitCard();
-results.A = { state: stateA, ms: Date.now() - t0, text: await cardText() };
+results.A = { state: stateA, ms: Date.now() - t0, text: await cardText(),
+  tips: await page.evaluate(() => [...document.querySelector('#spv-ext-card').shadowRoot.querySelectorAll('[title]')].map((e) => e.title)) };
 await page.screenshot({ path: '/tmp/spv-e2e-A.png' });
 await tabtape.step(page, 'SPV card shown');
 const head = page.locator('#spv-ext-card .head');
@@ -100,17 +101,22 @@ async function openListing(n, id, body) {
 const shadow = (sel) => page.evaluate((sel) => document.querySelector('#spv-ext-card').shadowRoot.querySelector(sel)?.innerText || null, sel);
 
 // A 2016 Camry without trim has other variants (hybrid); picking one makes it the main value.
-await tabtape.step(page, 'Open a 2016 Toyota Camry listing');
+await tabtape.step(page, 'Open a 2016 Toyota Camry listing in Facebook dark mode');
+await page.evaluate(() => { document.documentElement.classList.add('__fb-dark-mode'); document.body.style.background = '#18191a'; });
 await openListing(2, '1464033592278111', variantOf('1464033592278111', 'Toyota', 'Camry', '', '2016 Toyota Camry'));
 results.A.camry = { state: await waitCard(), text: await cardText() };
 const altCount = await page.evaluate(() => document.querySelector('#spv-ext-card').shadowRoot.querySelectorAll('[data-alt]').length);
 if (altCount) {
   const before = await shadow('.value');
+  await page.screenshot({ path: '/tmp/spv-e2e-A-alts.png' });
   await page.locator('#spv-ext-card [data-alt="0"]').click();
   results.A.choose = { before, after: await shadow('.value'), src: await shadow('.src') };
   await page.screenshot({ path: '/tmp/spv-e2e-A-choose.png' });
   await tabtape.step(page, 'Picked another variant');
 }
+
+await page.screenshot({ path: '/tmp/spv-e2e-A-dark.png' });
+await page.evaluate(() => { document.documentElement.classList.remove('__fb-dark-mode'); document.body.style.background = ''; });
 
 // A listing whose model text matches nothing: error with the VIN form; a VIN typed there is used.
 const badId = '1464033592278999';
