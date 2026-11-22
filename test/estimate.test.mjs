@@ -1,7 +1,7 @@
 // Runs the resolver against the live TxDMV SPV service with FB-shaped listings.
 // Usage: node test/estimate.test.mjs [filter]
 import { readFile } from 'node:fs/promises';
-import { estimate, checkDigit, isValidVin, findVinInText, parseSpvHtml, yearChar } from '../src/resolver.js';
+import { estimate, findAlternatives, checkDigit, isValidVin, findVinInText, parseSpvHtml, yearChar } from '../src/resolver.js';
 
 const root = new URL('../data/', import.meta.url);
 const makes = JSON.parse(await readFile(new URL('makes.json', root), 'utf8'));
@@ -50,7 +50,8 @@ for (const c of cases.filter((c) => !filter || c.name.toLowerCase().includes(fil
   const ms = Date.now() - t0;
   const line = r.ok
     ? `${r.source}/${r.confidence} ${r.vin} -> ${r.spv.year} ${r.spv.make} ${r.spv.model} ${r.spv.valueText} [${r.label || ''}] q=${r.queries} ${ms}ms` +
-      (r.alternatives?.length ? `\n      alts: ${r.alternatives.map((a) => `${a.model} $${a.value} [${a.label}]`).join('; ')}` : '')
+      (r.alternatives?.length ? `\n      alts: ${r.alternatives.map((a) => `${a.model} $${a.value} [${a.label}]`).join('; ')}` : '') +
+      (r.moreAlternatives ? ' (more variants on request)' : '')
     : `ERROR ${r.error} q=${r.queries ?? '-'} ${ms}ms`;
   console.log(`${c.name}: ${line}`);
   if (c.expect.error) { assert(!r.ok && c.expect.error.test(r.error), `${c.name} error`); continue; }
@@ -60,16 +61,20 @@ for (const c of cases.filter((c) => !filter || c.name.toLowerCase().includes(fil
   if (r.ok && c.expect.source) assert(r.source === c.expect.source, `${c.name} source ${r.source}`);
 }
 // SPV adjusts recent model years for mileage: the same listing text at another mileage reuses the
-// cached VIN but asks SPV again for the main value and the variants.
+// cached VIN and asks SPV again for the main value; its variants are re-priced when asked for.
 if (!filter || 'mileage'.includes(filter.toLowerCase())) {
   const l = { year: 2017, make: 'Chevrolet', model: 'Silverado 1500 Crew Cab', trim: 'LT Pickup 4D 5 3/4 ft', title: '2017 Chevrolet Silverado 1500 Crew Cab · LT Pickup 4D 5 3/4 ft' };
-  const low = await estimate({ ...l, mileage: 20000 }, { makes, loadIndex, cache, seedFills });
-  const high = await estimate({ ...l, mileage: 220000 }, { makes, loadIndex, cache, seedFills });
+  const deps = { makes, loadIndex, cache, seedFills };
+  const low = await estimate({ ...l, mileage: 20000 }, deps);
+  const high = await estimate({ ...l, mileage: 220000 }, deps);
+  const altsLow = await findAlternatives({ ...l, mileage: 20000 }, deps);
+  const altsHigh = await findAlternatives({ ...l, mileage: 220000 }, deps);
   const alt = (r) => (r.alternatives || []).map((a) => a.value).join(',');
-  console.log(`Mileage: 20k ${low.spv?.valueText} [${alt(low)}] -> 220k ${high.spv?.valueText} [${alt(high)}] cached=${!!high.cached} q=${high.queries}`);
-  assert(low.ok && high.ok && high.cached, 'mileage: both resolved, second from cache');
+  console.log(`Mileage: 20k ${low.spv?.valueText} [${alt(altsLow)}] -> 220k ${high.spv?.valueText} [${alt(altsHigh)}] cached=${!!high.cached} q=${high.queries}+${altsHigh.queries}`);
+  assert(low.ok && high.ok && high.cached && high.queries === 1, 'mileage: both resolved, second from cache with one query');
   assert(high.spv.value < low.spv.value, 'mileage: higher mileage, lower SPV');
-  assert(!low.alternatives.length || alt(low) !== alt(high), 'mileage: variant values re-priced');
+  assert(altsLow.ok && altsHigh.ok, 'mileage: variants on request');
+  assert(!altsLow.alternatives.length || alt(altsLow) !== alt(altsHigh), 'mileage: variant values re-priced');
 }
 console.log(failed ? `${failed} failed` : 'all passed');
 process.exit(failed ? 1 : 0);

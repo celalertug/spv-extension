@@ -1,2 +1,4 @@
 test/fixtures/
 node_modules/
+test/spv-answers.json
+dist/

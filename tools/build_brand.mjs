@@ -1,5 +1,7 @@
-// Brand assets: writes the StarTag logo SVGs to assets/ and renders the PNG icons and README banner
-// with Playwright's Chromium (no other dependencies).
+// Brand assets: writes the StarTag logo SVGs to assets/ and renders the PNG icons, the README banner
+// and the Chrome Web Store small promo tile (store/promo-440x280.png) with Playwright's Chromium
+// (no other dependencies). The 128 px icon follows the store rule: 96x96 artwork with 16 px of
+// transparent padding on each side.
 // Usage: node tools/build_brand.mjs
 import { chromium } from 'playwright';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -13,6 +15,7 @@ export const BRAND = {
 };
 
 const out = new URL('../assets/', import.meta.url);
+const store = new URL('../store/', import.meta.url);
 const f = (n) => Number(n.toFixed(2));
 
 // Five-point star centered on (cx, cy), point up.
@@ -60,19 +63,36 @@ function banner() {
 </div></body></html>`;
 }
 
+// Small promo tile for the store listing (440x280): readable at half size, little text.
+function promo() {
+  return `<html><body style="margin:0">
+<div id="p" style="width:440px;height:280px;display:flex;flex-direction:column;justify-content:center;gap:14px;padding:0 34px;box-sizing:border-box;background:${BRAND.navy};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif">
+  <div style="display:flex;align-items:center;gap:16px">
+    <div style="width:92px;height:92px;border-radius:22px;background:${BRAND.cream};display:flex;align-items:center;justify-content:center">${mark({ size: 84 })}</div>
+    <div style="font-size:58px;font-weight:800;letter-spacing:-1.5px;color:#fff;line-height:1">Star<span style="color:#ff5a6e">Tag</span></div>
+  </div>
+  <div style="font-size:25px;font-weight:600;color:#fff;line-height:1.2">Texas SPV on Marketplace cars</div>
+</div></body></html>`;
+}
+
 await mkdir(out, { recursive: true });
+await mkdir(store, { recursive: true });
 await writeFile(new URL('logo.svg', out), mark());
 await writeFile(new URL('logo-small.svg', out), mark({ small: true }));
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ deviceScaleFactor: 1 });
 for (const px of [16, 32, 48, 128]) {
+  const pad = px === 128 ? 16 : 0;
   await page.setViewportSize({ width: px, height: px });
-  await page.setContent(`<html><body style="margin:0;background:transparent">${mark({ size: px, small: px <= 32 })}</body></html>`);
-  await page.locator('svg').screenshot({ path: new URL(`icon-${px}.png`, out).pathname, omitBackground: true });
+  await page.setContent(`<html><body style="margin:0;background:transparent"><div id="i" style="width:${px - 2 * pad}px;height:${px - 2 * pad}px;padding:${pad}px;line-height:0">${mark({ size: px - 2 * pad, small: px <= 32 })}</div></body></html>`);
+  await page.locator('#i').screenshot({ path: new URL(`icon-${px}.png`, out).pathname, omitBackground: true });
 }
 await page.setViewportSize({ width: 1280, height: 400 });
 await page.setContent(banner());
 await page.locator('#b').screenshot({ path: new URL('banner.png', out).pathname });
+await page.setViewportSize({ width: 440, height: 280 });
+await page.setContent(promo());
+await page.locator('#p').screenshot({ path: new URL('promo-440x280.png', store).pathname });
 await browser.close();
 console.log('assets written');

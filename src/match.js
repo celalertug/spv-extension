@@ -446,12 +446,15 @@ export function realPrefixes(index, listing, tf, ranked) {
   return out.sort((a, b) => b.score - a.score || b.count - a.count);
 }
 
+// Chassis codes in vPIC's series (GSE20L, UCF30L/...) say nothing to a buyer.
+const CHASSIS = /^[A-Z]{2,5}\d{2}[A-Z]?(\/[A-Z0-9]+)*$/;
+
 export function describe(v) {
   const get = (c) => v.labels.filter(([code]) => code === c).map(([, val]) => val);
   const parts = [];
   const series = get('S')[0];
   const trim = get('T')[0];
-  if (series && !/^[A-Z]{2,5}\d{2}[A-Z]?(\/[A-Z0-9]+)*$/.test(series)) parts.push(series); // skip chassis codes (GSE20L, UCF30L/...)
+  if (series && !CHASSIS.test(series)) parts.push(series);
   if (trim && trim !== series) parts.push(trim);
   for (const e of get('E')) parts.push(e);
   for (const f of get('F')) parts.push(f);
@@ -460,4 +463,71 @@ export function describe(v) {
   const l = get('L')[0];
   if (l && Number(l)) parts.push(`${Number(l).toFixed(1)}L`);
   return parts.join(' · ');
+}
+
+// ------------------------------------------------------------------ VIN decode for the card
+
+/**
+ * What vPIC says about one VIN: its model and, per element (S series, T trim, L displacement,
+ * C cylinders, D drive, E electrification, F fuel), the value of the most specific pattern that
+ * fits. An element two equally specific patterns disagree on is left out. null when no model
+ * pattern of the WMI and year fits.
+ */
+export function decodeVin(index, vin, year) {
+  const c = [...vin.slice(3, 8), ...vin.slice(9, 17)];
+  const fits = (key) => keyToMask(key).every((s, i) => !s || s.has(c[i]));
+  const specificity = (key) => keyToMask(key).filter(Boolean).length;
+  let best = null;
+  for (const [model, entries] of Object.entries(index.models)) {
+    for (const [wmi, y0, y1, schema, key] of entries) {
+      if (wmi !== vin.slice(0, 3) || year < y0 || year > y1 || !fits(key)) continue;
+      const n = specificity(key);
+      if (!best || n > best.n) best = { model, schema, n };
+    }
+  }
+  if (!best) return null;
+  const pick = {};
+  for (const [key, code, value] of index.schemas[String(best.schema)] || []) {
+    if (!fits(key)) continue;
+    const n = specificity(key);
+    const p = pick[code];
+    if (!p || n > p.n) pick[code] = { n, value, tie: false };
+    else if (n === p.n && p.value !== value) p.tie = true;
+  }
+  const labels = {};
+  for (const [code, p] of Object.entries(pick)) if (!p.tie) labels[code] = p.value;
+  return { model: best.model, labels };
+}
+
+const FAMILY = /(series|class)$/;
+
+/**
+ * Name, engine and AWD of a decoded VIN for the card: { name: '330i xDrive Sedan', engine:
+ * '2.0L 4-cyl', awd: true }. The name is vPIC's model with its series and trim ("Silverado 1500
+ * LT"); SPV's model name instead when it says more ("CT 200h" for vPIC's "CT"); a series that
+ * names the car better replaces the model ("C300" for "C-Class"). Family names ("3-Series"),
+ * chassis codes and lists of trims are left out.
+ */
+export function vinSpecs(d, spvModel = '') {
+  const { S, T, L, C, D, E, F } = d.labels;
+  const parts = [norm(spvModel) !== norm(d.model) && norm(spvModel).includes(norm(d.model)) ? spvModel : d.model];
+  for (const raw of [S, T]) {
+    const p = String(raw || '').replace(/\s*\([^)]*\)/g, '').trim();
+    const k = norm(p);
+    // "SE/XLE", "Sport / Limited", "Base, 4": trims sharing one VIN pattern, the VIN does not say which.
+    if (!k || CHASSIS.test(p) || FAMILY.test(k) || /[/,]/.test(p)) continue;
+    const core = norm(parts[0]).replace(FAMILY, '');
+    if (core && k !== core && k.startsWith(core) && (core.length >= 2 || /^\d/.test(k.slice(core.length)))) { parts[0] = p; continue; }
+    if (norm(parts.join(' ')).includes(k)) continue;
+    parts.push(p);
+  }
+  const name = parts.join(' ');
+  let engine = '';
+  if (E === 'Electric' || F === 'Electric') engine = 'Electric';
+  else {
+    const kind = { Hybrid: 'hybrid', 'Plug-in Hybrid': 'plug-in hybrid', 'Fuel Cell': 'fuel cell' }[E] || { Diesel: 'diesel', CNG: 'CNG', Hydrogen: 'hydrogen' }[F];
+    engine = [Number(L) ? `${Number(L).toFixed(1)}L` : '', Number(C) ? `${Number(C)}-cyl` : '', kind && !norm(name).includes(norm(kind)) ? kind : ''].filter(Boolean).join(' ');
+    engine = engine.charAt(0).toUpperCase() + engine.slice(1);
+  }
+  return { name, engine: engine || null, awd: D === 'AWD' };
 }

@@ -1,5 +1,5 @@
 // E2E: load the SPV extension next to tabtape and check the card on Marketplace pages.
-//  A. SPA flow: a stub Marketplace page opens the listing with pushState + XHR to
+//  A. SPA flow (new profile: first-run notice, then OK): a stub Marketplace page opens the listing with pushState + XHR to
 //     /ajax/route-definition/, answered with the response recorded in tabtape session
 //     20261121-003647-2dff65 (2013 Lexus GS, no VIN).
 //  B. Real facebook.com, logged out, hard load of the same listing.
@@ -27,7 +27,7 @@ async function waitCard(timeout = 40000) {
   const end = Date.now() + timeout;
   while (Date.now() < end) {
     const s = await cardState();
-    if (s === 'done' || s === 'error') return s;
+    if (s === 'done' || s === 'error' || s === 'consent') return s;
     await page.waitForTimeout(250);
   }
   return await cardState();
@@ -55,11 +55,23 @@ await context.route('https://www.facebook.com/ajax/route-definition/?spv-e2e=1',
 
 const recA = await tabtape.start(page, { name: 'SPV extension: Marketplace SPA flow (recorded Lexus GS response)' });
 await page.goto('https://www.facebook.com/marketplace/?spv-e2e=1');
-await tabtape.step(page, 'Open the listing from the feed');
+await tabtape.step(page, 'Open the listing from the feed: first-run notice');
 await page.click('#open');
+// A new profile: the card first says what goes to TxDMV and waits for OK; nothing is asked before.
+const consent = { state: await waitCard() };
+await page.waitForTimeout(2500); // longer than the 1.5 s dwell time
+Object.assign(consent, {
+  stillWaiting: (await cardState()) === 'consent',
+  text: await cardText(),
+  privacy: await page.evaluate(() => document.querySelector('#spv-ext-card').shadowRoot.querySelector('.notice a')?.href || null),
+});
+await page.screenshot({ path: '/tmp/spv-e2e-A-consent.png' });
+await tabtape.step(page, 'OK on the notice');
+await page.locator('#spv-ext-card button.ok').click();
 const t0 = Date.now();
 const stateA = await waitCard();
-results.A = { state: stateA, ms: Date.now() - t0, text: await cardText(),
+results.A = { consent, state: stateA, ms: Date.now() - t0, text: await cardText(),
+  legal: await page.evaluate(() => document.querySelector('#spv-ext-card').shadowRoot.querySelector('.legal')?.innerText || null),
   tips: await page.evaluate(() => [...document.querySelector('#spv-ext-card').shadowRoot.querySelectorAll('[title]')].map((e) => e.title)) };
 await page.screenshot({ path: '/tmp/spv-e2e-A.png' });
 await tabtape.step(page, 'SPV card shown');
@@ -105,6 +117,17 @@ await tabtape.step(page, 'Open a 2016 Toyota Camry listing in Facebook dark mode
 await page.evaluate(() => { document.documentElement.classList.add('__fb-dark-mode'); document.body.style.background = '#18191a'; });
 await openListing(2, '1464033592278111', variantOf('1464033592278111', 'Toyota', 'Camry', '', '2016 Toyota Camry'));
 results.A.camry = { state: await waitCard(), text: await cardText() };
+// Similar variants are priced only on request.
+const moreAlts = page.locator('#spv-ext-card .more-alts');
+results.A.camry.offersMore = await moreAlts.count() > 0;
+if (results.A.camry.offersMore) {
+  await tabtape.step(page, 'Ask for similar variants');
+  await moreAlts.click();
+  await page.waitForTimeout(300);
+  const end = Date.now() + 60000;
+  while (Date.now() < end && await page.evaluate(() => !!document.querySelector('#spv-ext-card').shadowRoot.querySelector('.loading.small'))) await page.waitForTimeout(250);
+  results.A.camry.afterAsk = await cardText();
+}
 const altCount = await page.evaluate(() => document.querySelector('#spv-ext-card').shadowRoot.querySelectorAll('[data-alt]').length);
 if (altCount) {
   const before = await shadow('.value');

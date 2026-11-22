@@ -12,6 +12,17 @@
   let current = null; // { id, port }
   let host = null;
 
+  // Nothing goes to TxDMV before the user has read what is sent and clicked OK on the card once
+  // (the background checks it too). The answer is kept in chrome.storage for every tab.
+  const CONSENT_KEY = 'consent:txdmv';
+  const PRIVACY_URL = 'https://gist.github.com/celalertug/ff7214f00de40b35398c74f154c5055e';
+  let consented = chrome.storage.local.get(CONSENT_KEY).then((r) => !!r[CONSENT_KEY], () => false);
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local' || !changes[CONSENT_KEY]) return;
+    consented = Promise.resolve(!!changes[CONSENT_KEY].newValue);
+    if (changes[CONSENT_KEY].newValue) proceedAfterConsent();
+  });
+
   // ------------------------------------------------------------ listing extraction
 
   function parseChunks(text) {
@@ -125,8 +136,9 @@
   async function onRoute() {
     const id = itemId();
     if (current && current.id === id) return;
+    // Leaving a listing disconnects its port, which stops its TxDMV queries in the background.
     if (current && current.port) try { current.port.disconnect(); } catch {}
-    current = id ? { id } : null;
+    current = id ? { id, openedAt: Date.now() } : null;
     if (!id || dismissed.has(id)) { removeCard(); return; }
     render({ state: 'loading', text: 'Reading the listing…' });
     let listing = await waitForListing(id, 6000);
@@ -137,26 +149,79 @@
       if (!/\b(19[5-9]\d|20[0-4]\d)\b/.test(page.pageTitle)) { removeCard(); return; }
       listing = { ...page, ...(listing || {}) };
     }
+    if (!(await consented)) {
+      if (!current || current.id !== id) return;
+      askConsent(listing);
+      return;
+    }
+    if (!current || current.id !== id) return;
     requestEstimate(listing);
   }
 
+  function askConsent(listing) {
+    current.listing = listing;
+    current.awaitingConsent = true;
+    render({ state: 'consent', listing });
+  }
+
+  function proceedAfterConsent() {
+    if (!current || !current.awaitingConsent || !current.listing) return;
+    current.awaitingConsent = false;
+    render({ state: 'loading', text: 'Looking up the Texas value…', listing: current.listing });
+    requestEstimate(current.listing);
+  }
+
+  // The background starts asking TxDMV only once the listing has been open a moment (openedAt).
   function requestEstimate(listing) {
+    current.listing = listing;
+    send({ type: 'estimate', openedAt: current.openedAt });
+  }
+
+  function onMessage(id, msg) {
+    if (!current || current.id !== id) return;
+    if (msg.result && msg.result.needsConsent) {
+      consented = Promise.resolve(false);
+      askConsent(current.listing);
+      return;
+    }
+    if (msg.type === 'progress' && msg.step === 'alternatives') {
+      if (!current.result || !current.result.ok) return;
+      current.altLoading = msg.tried ? `${msg.tried} VIN patterns tried` : 'Asking TxDMV';
+      render({ state: 'done', listing: current.listing, result: current.result });
+    } else if (msg.type === 'progress') {
+      const hint = msg.step === 'search' ? `${msg.tried} VIN patterns tried` : 'Asking TxDMV';
+      render({ state: 'loading', text: 'Looking up the Texas value…', hint, listing: msg.listing || current.listing });
+    } else if (msg.type === 'result') {
+      current.listing = msg.listing || current.listing;
+      if (msg.result.ok || !current.result || !current.result.ok) current.result = msg.result;
+      render({ state: current.result.ok ? 'done' : 'error', listing: current.listing, result: current.result, notice: msg.result.ok ? null : msg.result.error });
+    } else if (msg.type === 'alternatives') {
+      current.altLoading = null;
+      const r = current.result;
+      if (!r || !r.ok) return;
+      if (msg.result.ok) {
+        // The estimate's own variant is among them when the user had picked another one.
+        const alternatives = [msg.result.primary, ...msg.result.alternatives].filter((a) => a.vin !== r.vin);
+        current.result = { ...r, alternatives, moreAlternatives: msg.result.moreAlternatives, altsChecked: true };
+      }
+      render({ state: 'done', listing: current.listing, result: current.result, notice: msg.result.ok ? null : msg.result.error });
+    }
+  }
+
+  // One port per open listing; a new one if the service worker was restarted meanwhile.
+  function connect() {
+    const id = current.id;
     const port = chrome.runtime.connect({ name: 'spv' });
     current.port = port;
-    current.listing = listing;
-    const id = listing.id;
-    port.onMessage.addListener((msg) => {
-      if (!current || current.id !== id) return;
-      if (msg.type === 'progress') {
-        const hint = msg.step === 'search' ? `${msg.tried} VIN patterns tried` : 'Asking TxDMV';
-        render({ state: 'loading', text: 'Looking up the Texas value…', hint, listing: msg.listing || listing });
-      } else if (msg.type === 'result') {
-        current.listing = msg.listing || listing;
-        if (msg.result.ok || !current.result || !current.result.ok) current.result = msg.result;
-        render({ state: current.result.ok ? 'done' : 'error', listing: current.listing, result: current.result, notice: msg.result.ok ? null : msg.result.error });
-      }
+    port.onMessage.addListener((msg) => onMessage(id, msg));
+    port.onDisconnect.addListener(() => {
+      if (!current || current.port !== port) return;
+      current.port = null;
+      // Worker gone before answering: ask once more.
+      if (!current.result && !current.retried && current.listing) { current.retried = true; requestEstimate(current.listing); }
+      else if (current.altLoading) { current.altLoading = null; render({ state: 'done', listing: current.listing, result: current.result }); }
     });
-    port.postMessage({ type: 'estimate', listing });
+    return port;
   }
 
   // Facebook navigates with history.pushState; poll the URL rather than patching history.
@@ -240,7 +305,16 @@
   };
 
   function send(msg) {
-    if (current && current.port) try { current.port.postMessage({ ...msg, listing: current.listing }); } catch {}
+    if (!current) return;
+    try { (current.port || connect()).postMessage({ ...msg, listing: current.listing }); } catch {}
+  }
+
+  // Similar variants are priced on request (each costs TxDMV queries unless already cached).
+  function askAlternatives() {
+    if (!current || !current.result || !current.result.ok || current.altLoading) return;
+    current.altLoading = 'Asking TxDMV';
+    render({ state: 'done', listing: current.listing, result: current.result });
+    send({ type: 'alternatives' });
   }
 
   // An alternative becomes the main value; the choice is remembered for this listing.
@@ -248,9 +322,9 @@
     const r = current && current.result;
     if (!r || !r.alternatives || !r.alternatives[i]) return;
     const alt = r.alternatives[i];
-    const prev = { vin: r.vin, label: r.label, model: r.spv.model, value: r.spv.value };
+    const prev = { vin: r.vin, label: r.label, model: r.spv.model, value: r.spv.value, specs: r.specs };
     const alternatives = [prev, ...r.alternatives.filter((_, k) => k !== i)];
-    current.result = { ...r, source: 'chosen', vin: alt.vin, label: alt.label, spv: { ...r.spv, model: alt.model, value: alt.value }, alternatives };
+    current.result = { ...r, source: 'chosen', vin: alt.vin, label: alt.label, specs: alt.specs, spv: { ...r.spv, model: alt.model, value: alt.value }, alternatives };
     send({ type: 'choose', vin: alt.vin });
     render({ state: 'done', listing: current.listing, result: current.result });
   }
@@ -273,7 +347,16 @@
     const vehicle = listing ? [listing.year, listing.make, listing.model].filter(Boolean).join(' ') : '';
     let body = '';
     let foot = '';
-    if (state === 'loading') {
+    if (state === 'consent') {
+      body = `<div class="sub">${esc(vehicle)}</div>
+        <div class="notice">
+          <p><b>Before the first lookup</b></p>
+          <p>StarTag gets the Texas value from the TxDMV SPV calculator (tools.txdmv.gov). For each listing you open,
+          it sends TxDMV the vehicle's <b>VIN and mileage</b>; when the listing shows no VIN, VINs built from its year, make and model.</p>
+          <p>Nothing else leaves your browser: StarTag has no server, and its results stay in this browser.</p>
+          <div class="actions"><button class="ok">OK, show values</button><a href="${esc(PRIVACY_URL)}" target="_blank" rel="noopener">Privacy policy</a></div>
+        </div>`;
+    } else if (state === 'loading') {
       body = `<div class="sub">${esc(vehicle)}</div><div class="loading" title="${esc(hint || '')}"><span class="spin"></span>${esc(text)}</div>`;
     } else if (state === 'error') {
       body = `<div class="sub">${esc(vehicle)}</div><div class="err" title="${esc(result.error)}">No value for this listing <span class="i">ⓘ</span></div>`;
@@ -287,14 +370,15 @@
       const conf = result.source === 'estimated' ? CONFIDENCE[result.confidence] : '';
       const srcTip = [how, conf, `VIN: ${result.vin}`].filter(Boolean).join('\n');
       const dot = result.source === 'estimated' ? `<span class="dot ${esc(result.confidence)}"></span>` : '';
-      const label = cleanLabel(result.label, spv.model);
+      // Only what the VIN says (model, engine, AWD); what the listing says is on the page already.
+      const specs = result.specs;
+      const specLine = specs ? [specs.engine, specs.awd ? 'AWD' : ''].filter(Boolean).join(' · ') : '';
       // SPV adjusts recent model years for mileage; 0 (unknown) gets the value at average mileage.
       const miles = listing && listing.mileage > 0 ? listing.mileage : 0;
-      const milesText = miles ? `${miles >= 1000 ? `${Math.round(miles / 1000)}k` : miles} mi` : 'avg. miles';
       const milesTip = miles
         ? `Value for ${miles.toLocaleString('en-US')} miles (SPV adjusts recent model years for mileage)`
         : 'No mileage in the listing: SPV value at average mileage';
-      const nameTip = [`${spv.year} ${spv.make} ${spv.model}`, label, milesTip, 'Texas Standard Presumptive Value (TxDMV)'].filter(Boolean).join('\n');
+      const nameTip = [`TxDMV: ${spv.year} ${spv.make} ${spv.model}`, specs ? 'Model and engine decoded from the VIN (NHTSA vPIC)' : '', milesTip].filter(Boolean).join('\n');
 
       let rows = '';
       const price = listing && listing.price;
@@ -304,15 +388,23 @@
         rows = `<div class="row" title="${esc(`${money(Math.abs(diff))} ${diff >= 0 ? 'above' : 'below'} SPV`)}"><span>Price</span><span><b>${money(price)}</b> <span class="${diff > 0 ? 'up' : 'down'}">${pct > 0 ? '+' : pct < 0 ? '−' : '±'}${Math.abs(pct)}%</span></span></div>`;
       }
       const alts = result.alternatives || [];
-      // Similar variants with their SPV; clicking one makes it the main value.
-      const altBlock = alts.length ? `<div class="alts"><div class="label">Similar variants</div>${alts.map((a, i) => {
+      // Similar variants with their SPV; clicking one makes it the main value. The ones not priced
+      // yet are asked from TxDMV only when the user clicks for them.
+      const altLoading = current && current.altLoading;
+      const canAsk = result.moreAlternatives && (result.source === 'estimated' || result.source === 'chosen');
+      const altTail = altLoading
+        ? `<div class="loading small" title="${esc(altLoading)}"><span class="spin"></span>Checking other variants…</div>`
+        : canAsk
+          ? `<button class="more-alts" title="Asks TxDMV for the value of other likely variants (drive, engine, trim)">${alts.length ? 'More similar variants' : 'Show similar variants'}</button>`
+          : !alts.length && result.altsChecked ? '<div class="none">No variant with a different value</div>' : '';
+      const altBlock = alts.length || altTail ? `<div class="alts"><div class="label">Similar variants</div>${alts.map((a, i) => {
         const lbl = cleanLabel(a.label, a.model);
         return `<div class="row alt" data-alt="${i}" title="${esc([a.model, lbl].filter(Boolean).join(' · '))}\nClick to use"><span class="t">${esc(a.model)}${lbl ? ` <i>${esc(shortLabel(lbl))}</i>` : ''}</span><b>${money(a.value)}</b></div>`;
-      }).join('')}</div>` : '';
+      }).join('')}${altTail}</div>` : '';
       body = `
         <div class="top"><div class="value">${money(spv.value)}</div><span class="src ${esc(result.source)}" title="${esc(srcTip)}">${dot}${esc(chip)}</span></div>
         <div class="more">
-          <div class="sub" title="${esc(nameTip)}">${esc(spv.year)} ${esc(spv.make)} ${esc(spv.model)}${label ? ` <i>${esc(shortLabel(label))}</i>` : ''} · ${esc(milesText)}</div>
+          <div class="veh" title="${esc(nameTip)}"><div class="name">${esc(spv.year)} ${esc(spv.make)} ${esc((specs && specs.name) || spv.model)}</div>${specLine ? `<div class="sub">${esc(specLine)}</div>` : ''}</div>
           ${rows ? `<div class="sep"></div>${rows}` : ''}
           ${notice ? `<div class="err">${esc(notice)}</div>` : ''}
           ${altBlock}
@@ -342,7 +434,9 @@
         .dot { width: 7px; height: 7px; border-radius: 50%; background: ${muted}; }
         .dot.high { background: #1e8e3e; } .dot.medium { background: #e0a100; } .dot.low { background: #d93025; }
         .sub { color: ${muted}; margin-top: 1px; }
-        .more .sub { cursor: help; }
+        .veh { cursor: help; margin-top: 2px; }
+        .name { font-size: 14px; font-weight: 600; }
+        .veh .sub { font-size: 12.5px; }
         i { font-style: normal; color: ${muted}; }
         .sep { height: 1px; background: ${line}; margin: 8px 0 6px; }
         .row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin: 3px 0; }
@@ -357,13 +451,25 @@
         .row.alt { cursor: pointer; border-radius: 4px; padding: 2px 4px; margin: 1px -4px; font-size: 12px; }
         .row.alt .t { color: inherit; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .row.alt:hover { background: ${dark ? '#3a3b3c' : '#f0f2f5'}; }
+        .more-alts { display: block; margin-top: 2px; padding: 0; border: 0; background: none; cursor: pointer; font: 12px inherit; color: ${dark ? '#4599ff' : '#0064d1'}; }
+        .more-alts:hover { text-decoration: underline; }
+        .alts .none { font-size: 12px; color: ${muted}; }
+        .loading.small { font-size: 12px; margin-top: 2px; }
+        .loading.small .spin { width: 9px; height: 9px; }
         .loading { display: flex; align-items: center; gap: 8px; margin-top: 6px; color: ${muted}; }
         .spin { width: 12px; height: 12px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: s .8s linear infinite; }
         @keyframes s { to { transform: rotate(360deg); } }
         .err { color: #d93025; margin-top: 6px; font-size: 12px; }
         .err[title] { cursor: help; }
         .err .i { font-size: 11px; opacity: .8; }
-        .card.collapsed .more, .card.collapsed .foot { display: none; }
+        .card.collapsed .more, .card.collapsed .foot, .card.collapsed .legal { display: none; }
+        .legal { margin-top: 8px; font-size: 10.5px; color: ${muted}; }
+        .legal a, .notice a { color: inherit; }
+        .notice { margin-top: 6px; font-size: 12.5px; }
+        .notice p { margin: 0 0 6px; }
+        .notice .actions { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+        .notice button.ok { font: 600 12.5px inherit; padding: 5px 12px; border-radius: 6px; border: 0; background: ${dark ? '#3b5b85' : NAVY}; color: #fff; cursor: pointer; }
+        .card[data-state="consent"] .legal { margin-top: 6px; }
         .card.collapsed .value { font-size: 20px; }
         details.vin summary { color: ${dark ? '#4599ff' : '#0064d1'}; }
         details.vin form { display: flex; gap: 6px; margin-top: 6px; }
@@ -371,17 +477,26 @@
           border: 1px solid ${dark ? '#3e4042' : '#ccd0d5'}; border-radius: 6px; background: ${dark ? '#3a3b3c' : '#fff'}; color: inherit; }
         details.vin button { font: 600 12px inherit; padding: 4px 10px; border-radius: 6px; border: 0; background: ${dark ? '#3b5b85' : NAVY}; color: #fff; cursor: pointer; }
       </style>
-      <div class="card${ui.collapsed ? ' collapsed' : ''}" data-state="${state}">
+      <div class="card${ui.collapsed && state !== 'consent' ? ' collapsed' : ''}" data-state="${state}">
         <div class="head" title="Drag to move, click to collapse"><span class="brand">${LOGO}<b>Star<span class="r">Tag</span></b></span>
           <span class="tools"><a href="https://www.txdmv.gov/standard-presumptive-calculator" target="_blank" rel="noopener" title="TxDMV SPV calculator">↗</a><button class="x" title="Hide for this listing">×</button></span></div>
         ${body}
         ${foot ? `<div class="foot">${foot}</div>` : ''}
+        <div class="legal">Not affiliated with TxDMV or Meta · <a href="${esc(PRIVACY_URL)}" target="_blank" rel="noopener">Privacy</a></div>
       </div>`;
     const card = host.shadowRoot.querySelector('.card');
     const pos = savedPos();
     if (pos) Object.assign(card.style, { left: `${Math.min(pos.left, window.innerWidth - 300)}px`, top: `${Math.min(pos.top, window.innerHeight - 40)}px`, right: 'auto' });
     makeDraggable(card, host.shadowRoot.querySelector('.head'));
     host.shadowRoot.querySelectorAll('[data-alt]').forEach((el) => el.addEventListener('click', () => choose(Number(el.dataset.alt))));
+    const ok = host.shadowRoot.querySelector('.notice button.ok');
+    if (ok) ok.addEventListener('click', () => {
+      consented = Promise.resolve(true);
+      chrome.storage.local.set({ [CONSENT_KEY]: { t: Date.now() } });
+      proceedAfterConsent();
+    });
+    const moreAlts = host.shadowRoot.querySelector('.more-alts');
+    if (moreAlts) moreAlts.addEventListener('click', askAlternatives);
     const form = host.shadowRoot.querySelector('details.vin form');
     if (form) form.addEventListener('submit', (e) => {
       e.preventDefault();

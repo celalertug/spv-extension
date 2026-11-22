@@ -1,0 +1,35 @@
+StarTag – Texas SPV for Marketplace
+
+StarTag is not affiliated with, endorsed by or sponsored by the Texas Department of Motor Vehicles
+(TxDMV) or Meta Platforms, Inc. Facebook and Marketplace are trademarks of Meta Platforms, Inc.;
+the names only describe the pages the extension works on. SPV values come from TxDMV's Standard
+Presumptive Value calculator (tools.txdmv.gov) at the time of the lookup; none are shipped with the
+extension.
+
+Data
+
+- data/makes.json and data/index/ are built from NHTSA's Product Information Catalog and Vehicle
+  Listing (vPIC), a work of the U.S. government in the public domain, from the vpic.lite.db file
+  of the @cardog/corgi package (https://github.com/cardog-ai/corgi, license below).
+- The real VIN prefixes in data/index/ (VIN positions 1-8 and 10, with counts) come from NHTSA's
+  consumer complaints file (https://static.nhtsa.gov/odi/ffdd/cmpl/FLAT_CMPL.zip), a work of the
+  U.S. government in the public domain.
+
+------------------------------------------------------------------------------------------------
+@cardog/corgi
+
+ISC License
+
+Copyright (c) 2023-present, CRDG
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
