@@ -2,9 +2,9 @@
   "manifest_version": 3,
   "name": "StarTag – Texas SPV for Marketplace",
   "short_name": "StarTag",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "minimum_chrome_version": "116",
-  "description": "See the Texas Standard Presumptive Value (TxDMV) of Facebook Marketplace vehicle listings, with similar variants.",
+  "description": "See what Facebook Marketplace cars actually sell for in Texas (TxDMV SPV), right next to the asking price.",
   "icons": {
     "16": "assets/icon-16.png",
     "32": "assets/icon-32.png",

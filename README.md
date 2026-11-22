@@ -3,8 +3,9 @@
 # StarTag: Texas SPV for Marketplace
 
 Chrome extension (MV3). Shows the TxDMV Standard Presumptive Value of the vehicle on a Facebook
-Marketplace listing page in a card: SPV, the model and engine of the VIN it used (and AWD), listing
-price vs SPV and the SPV of similar variants of the model (click one to use it). How the value was
+Marketplace listing page in a card: SPV (labelled "Sells for in Texas": it is built from Texas sales,
+not from listings), the model and engine of the VIN it used (and AWD), the asking price vs SPV and
+the SPV of similar variants of the model (click one to use it). How the value was
 found, how sure the estimate is and the VIN it used are in the tooltips.
 
 The model and engine come from the VIN, decoded with the vPIC patterns in `data/index/` (`decodeVin`
@@ -123,9 +124,13 @@ carries the credits and the ISC notice into the package.
   names or a module `src/` imports is missing. Bump `version` in `manifest.json` for each upload.
 - `npm run build:brand`: also renders `store/promo-440x280.png`; the 128 px icon is 96 px artwork
   with 16 px of transparent padding, as the store asks.
-- `node tools/screenshots.mjs [listingId]`: 1280×800 screenshots of the first-run notice, the card
-  and its similar variants on a real listing (logged out; Facebook's login prompts are hidden), recorded with tabtape. Check them for
-  seller details before uploading.
+- `node tools/screenshots.mjs [listingId]`: 1280×800 screenshots of the card, its similar variants and
+  the first-run notice on a real listing (logged out; Facebook's login prompts are hidden), rendered at
+  1440×900 and scaled down, recorded with tabtape. The card is moved over Facebook's left menu so it
+  does not cover the listing's title and price. Check them for seller details before uploading.
+- Homepage: https://celalertug.github.io/startag/, served by GitHub Pages from the public repository
+  [celalertug/startag](https://github.com/celalertug/startag) (a single `index.html`); its issues are
+  the support URL.
 - `store/listing.md`: summary, description, category, single-purpose statement, permission
   justifications, data-usage answers and reviewer notes for the developer dashboard.
 

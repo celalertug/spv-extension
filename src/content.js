@@ -385,7 +385,7 @@
       if (Number.isFinite(price) && price > 0) {
         const diff = price - spv.value;
         const pct = spv.value ? Math.round((diff / spv.value) * 100) : 0;
-        rows = `<div class="row" title="${esc(`${money(Math.abs(diff))} ${diff >= 0 ? 'above' : 'below'} SPV`)}"><span>Price</span><span><b>${money(price)}</b> <span class="${diff > 0 ? 'up' : 'down'}">${pct > 0 ? '+' : pct < 0 ? '−' : '±'}${Math.abs(pct)}%</span></span></div>`;
+        rows = `<div class="row" title="${esc(`${money(Math.abs(diff))} ${diff >= 0 ? 'above' : 'below'} SPV`)}"><span>Asking</span><span><b>${money(price)}</b> <span class="${diff > 0 ? 'up' : 'down'}">${pct > 0 ? '+' : pct < 0 ? '−' : '±'}${Math.abs(pct)}%</span></span></div>`;
       }
       const alts = result.alternatives || [];
       // Similar variants with their SPV; clicking one makes it the main value. The ones not priced
@@ -403,6 +403,7 @@
       }).join('')}${altTail}</div>` : '';
       body = `
         <div class="top"><div class="value">${money(spv.value)}</div><span class="src ${esc(result.source)}" title="${esc(srcTip)}">${dot}${esc(chip)}</span></div>
+        <div class="what" title="TxDMV Standard Presumptive Value (SPV): what cars like this sell for in Texas, built from Texas sales, not from listings">Sells for in Texas</div>
         <div class="more">
           <div class="veh" title="${esc(nameTip)}"><div class="name">${esc(spv.year)} ${esc(spv.make)} ${esc((specs && specs.name) || spv.model)}</div>${specLine ? `<div class="sub">${esc(specLine)}</div>` : ''}</div>
           ${rows ? `<div class="sep"></div>${rows}` : ''}
@@ -434,6 +435,7 @@
         .dot { width: 7px; height: 7px; border-radius: 50%; background: ${muted}; }
         .dot.high { background: #1e8e3e; } .dot.medium { background: #e0a100; } .dot.low { background: #d93025; }
         .sub { color: ${muted}; margin-top: 1px; }
+        .what { color: ${muted}; font-size: 12px; margin-top: -2px; cursor: help; }
         .veh { cursor: help; margin-top: 2px; }
         .name { font-size: 14px; font-weight: 600; }
         .veh .sub { font-size: 12.5px; }

@@ -5,23 +5,29 @@ Texts and answers for the developer dashboard. Upload `dist/startag-<version>.zi
 ## Store listing tab
 
 - **Name** (from the manifest): StarTag – Texas SPV for Marketplace
-- **Summary** (manifest `description`, max 132): See the Texas Standard Presumptive Value (TxDMV) of
-  Facebook Marketplace vehicle listings, with similar variants.
+- **Summary** (manifest `description`, max 132): See what Facebook Marketplace cars actually sell
+  for in Texas (TxDMV SPV), right next to the asking price.
 - **Category**: Shopping
 - **Language**: English (United States)
 - **Icon**: `assets/icon-128.png` (96 px artwork, 16 px transparent padding)
-- **Screenshots** (1280×800, `node tools/screenshots.mjs`): `store/screenshot-1-notice.png`,
-  `store/screenshot-2-card.png`, `store/screenshot-3-variants.png`. They are taken on a real listing,
-  logged out, with Facebook's login prompts hidden; check them for anything that identifies the seller before uploading.
+- **Screenshots** (1280×800, `node tools/screenshots.mjs`), in this order: `store/screenshot-1-card.png`,
+  `store/screenshot-2-variants.png`, `store/screenshot-3-notice.png` (the first one is the listing's
+  cover, so it shows a value, not the notice). They are taken on a real listing (a 2017 Mercedes-Benz
+  GLC 300 with a daylight exterior photo), logged out, with Facebook's login prompts hidden; check them
+  for anything that identifies the seller (names, readable plates) before uploading.
 - **Small promo tile** (440×280, `npm run build:brand`): `store/promo-440x280.png`
 - **Marquee** (1400×560): none (only needed to be featured)
-- **Official URL / homepage**: none (the repository is private)
-- **Support URL**: none; the developer contact email is shown on the listing
+- **Official URL**: none (needs a site verified in Google Search Console)
+- **Homepage URL**: https://celalertug.github.io/startag/ (GitHub Pages of the public repository
+  [celalertug/startag](https://github.com/celalertug/startag), a single static page)
+- **Support URL**: https://github.com/celalertug/startag/issues
 
 ### Description
 
 ```
-StarTag shows the Texas Standard Presumptive Value (SPV) of the vehicle on a Facebook Marketplace listing, in a small card next to the listing, so you can compare the asking price with the value TxDMV uses for that vehicle.
+Is that Marketplace price fair? The asking price is what the seller wants. StarTag shows what cars like it actually sell for in Texas, in a small card next to the listing.
+
+The number is the state's own: the TxDMV Standard Presumptive Value (SPV), built from Texas sales, not from listings, and updated weekly.
 
 • The SPV of the listing's vehicle, and how far the asking price is above or below it.
 • The model and engine of the VIN the value is for.

@@ -1,28 +1,36 @@
 // Chrome Web Store screenshots (1280x800): the card on a real Marketplace listing, opened logged
 // out on facebook.com with the extension loaded in Playwright Chromium. The run is recorded with
 // tabtape (Repoburg); the replay link is printed at the end.
-//   store/screenshot-1-notice.png    first-run notice (what is sent to TxDMV)
-//   store/screenshot-2-card.png      the value, price vs SPV
-//   store/screenshot-3-variants.png  similar variants priced on request
-// Usage: node tools/screenshots.mjs [listingId]   (a vehicle listing without a VIN in it)
+//   store/screenshot-1-card.png      the value, price vs SPV
+//   store/screenshot-2-variants.png  similar variants priced on request
+//   store/screenshot-3-notice.png    first-run notice (what is sent to TxDMV)
+// Usage: node tools/screenshots.mjs [listingId]   (a vehicle listing without a VIN in it; pick one
+// with a daylight exterior photo first and no readable plate)
 // Facebook's logged-out prompts (the login form in the header, the "Log in or sign up" bar) are
 // hidden before each shot. Check the shots before uploading: retake anything that identifies the seller.
 import { chromium } from 'playwright';
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 
 const tabtape = await import(path.join(execSync('npm root -g').toString().trim(), 'repoburg/tabtape/playwright/tabtape.mjs'));
 const EXT = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
 const out = new URL('../store/', import.meta.url).pathname;
-const ITEM = process.argv[2] || '1464033592278205';
+const ITEM = process.argv[2] || '1176930821675089';
 
 await mkdir(out, { recursive: true });
 const both = `${tabtape.extensionPath},${EXT}`;
 const context = await tabtape.launch(chromium, {
   args: [`--disable-extensions-except=${both}`, `--load-extension=${both}`],
-  viewport: { width: 1280, height: 800 },
+  // Rendered at 1440x900 and scaled down to 1280x800: at 1280 px Facebook squeezes the listing's
+  // details column until words break.
+  viewport: { width: 1440, height: 900 },
   deviceScaleFactor: 1,
+});
+// At its default place (top right) the card covers the listing's title and asking price. For the
+// shots it is moved, as a user would drag it, over Facebook's left menu (360 px wide at 1440 px).
+await context.addInitScript(() => {
+  if (location.hostname === 'www.facebook.com') localStorage.setItem('spvExtCardPos', JSON.stringify({ left: 16, top: 64 }));
 });
 const page = await context.newPage();
 const card = (sel = '.card') => page.locator('#spv-ext-card').locator(sel);
@@ -69,6 +77,7 @@ async function shot(name) {
   await hideLoginPrompts();
   await page.waitForTimeout(200);
   await page.screenshot({ path: `${out}${name}` });
+  execFileSync('sips', ['--resampleHeightWidth', '800', '1280', `${out}${name}`], { stdio: 'ignore' });
 }
 
 await tabtape.start(page, { name: 'StarTag store screenshots' });
@@ -77,12 +86,12 @@ await page.waitForTimeout(3000);
 await clearOverlays();
 await tabtape.step(page, 'First-run notice');
 await waitState(['consent']);
-await shot('screenshot-1-notice.png');
+await shot('screenshot-3-notice.png');
 
 await tabtape.step(page, 'OK: look up the value');
 await card('button.ok').click();
 if ((await waitState(['done', 'error'])) !== 'done') throw new Error(`no value: ${await card().innerText()}`);
-await shot('screenshot-2-card.png');
+await shot('screenshot-1-card.png');
 
 const more = card('.more-alts');
 if (await more.count()) {
@@ -91,7 +100,7 @@ if (await more.count()) {
   await page.waitForTimeout(300);
   const end = Date.now() + 60000;
   while (Date.now() < end && (await card('.loading.small').count())) await page.waitForTimeout(250);
-  await shot('screenshot-3-variants.png');
+  await shot('screenshot-2-variants.png');
 }
 const rec = await tabtape.stop(context);
 console.log(`screenshots in store/; replay: ${rec.url}`);
